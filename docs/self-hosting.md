@@ -328,7 +328,7 @@ It is opt-in for now because it has not yet been proven against a live Vercel de
 
 ## Deploy to Build
 
-Deploy this repository with Build's Heroku Node.js buildpack. `package.json` pins Node.js 24, and the build runs `npm run build`. Keep the complete application and its installed dependencies in the release: PDF generation reads the bundled fonts and WebAssembly files at runtime.
+Deploy this repository with Build's Heroku Node.js buildpack. `package.json` pins Node.js 24, and the build runs `npm run build`. Set `NPM_CONFIG_INCLUDE=dev` in Build so npm installs the TypeScript and Tailwind build tools even when `NODE_ENV=production`. Keep the complete application and its installed dependencies in the release: PDF generation reads the bundled fonts and WebAssembly files at runtime.
 
 The root `Procfile` defines two processes:
 
