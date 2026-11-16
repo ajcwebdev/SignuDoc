@@ -9,6 +9,7 @@ import {
 } from "@/components/setup/setup-shell";
 import { getAuthSession } from "@/lib/auth/server";
 import { buildBranding } from "@/lib/branding";
+import { resolveEmailDriver } from "@/lib/services/email";
 import { ServiceConfigurationError } from "@/lib/services/service-config";
 import {
   getSetupState,
@@ -89,6 +90,7 @@ export default async function SetupPage() {
     <BrandingProvider branding={buildBranding(resolveSettings(null))}>
       <SetupShell
         hosted={isHostedMode()}
+        mockEmail={resolveEmailDriver() === "mock"}
         onVercel={process.env.VERCEL === "1"}
         knownSupportAddress={
           process.env.SUPPORT_EMAIL?.trim() || storedSupportAddress

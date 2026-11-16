@@ -3,6 +3,7 @@
 Everything about running your own SignuDoc: deploying it, setting it up, what it costs, keeping it up to date, and the settings you can change. For working on the code, see [Development](development.md).
 
 - [Deploy to Vercel](#deploy-to-vercel)
+- [Deploy to Build](#deploy-to-build)
 - [Set the site up](#set-the-site-up)
 - [Your responsibilities](#your-responsibilities)
 - [Signed PDFs and the seal](#signed-pdfs-and-the-seal)
@@ -153,7 +154,7 @@ The first time you open a new install it takes you to `/setup`. There you name y
 
 - **Who can sign up.** The install starts by letting people with an email address at the administrator's own domain create accounts (or nobody else, if the administrator used a public mailbox such as Gmail). The administrator can change this under Settings, Organization: people at listed domains, nobody, or anyone. People who are only sent a document to sign never need an account.
 - **More administrators.** Settings, Organization lists everyone with an account under People, where an administrator can make someone else an administrator or take that away. There is always at least one. When an account is closed, its finished documents and their audit trails move to the longest-standing administrator, because they are the organization's records. If that person later stops being an administrator, those documents move on to one who stays, and the documents they sent themselves stay with them.
-- **Email.** Settings, Organization also shows whether email is working. While no sender address is set, mail goes out from Resend's test address, which only reaches the owner of the Resend account. Enter a sender address at your domain and the page shows the DNS records to add and checks them for you. Mail from that address is not delivered until its domain is verified.
+- **Email.** Settings, Organization also shows whether email is working. For a demo without an email service, set `EMAIL_DRIVER=mock` and restart the app. Nothing is sent externally: messages are kept privately in Postgres, and administrators open invitations, password resets and verification links under Settings, Organization, Mock email outbox. No Resend API key or verified sender domain is needed. This gives administrators access to the links that would normally reach each recipient, so use it for demonstrations with test accounts. For real delivery, use `EMAIL_DRIVER=resend` and a Resend API key. While no sender address is set, mail goes out from Resend's test address, which only reaches the owner of the Resend account. Enter a sender address at your domain and the page shows the DNS records to add and checks them for you. Mail from that address is not delivered until its domain is verified.
 - **`SETUP_TOKEN`.** A new install can be claimed by whoever opens it first. If its URL will be public before you get to it, set `SETUP_TOKEN` to a secret of your own and the setup page will ask for it.
 - **An install from before this page existed** has accounts but no administrator. Set `SETUP_TOKEN`, sign in with the account that should be in charge, and open `/setup`. It asks for a support address if the install has none. Sign-up stays open, as it was, until that administrator changes it.
 
@@ -325,6 +326,23 @@ It is opt-in for now because it has not yet been proven against a live Vercel de
 
 `HOSTED_MODE=1` runs SignuDoc as a public service under its own name: the landing page at `/`, the built-in terms, privacy, contact and accessibility pages, and sign-up open to anyone. Leave it unset for an install that belongs to one organization.
 
+## Deploy to Build
+
+Deploy this repository with Build's Heroku Node.js buildpack. `package.json` pins Node.js 24, and the build runs `npm run build`. Keep the complete application and its installed dependencies in the release: PDF generation reads the bundled fonts and WebAssembly files at runtime.
+
+The root `Procfile` defines two processes:
+
+- `release` runs `npm run db:migrate`. A missing database or failed migration fails the release; migrations are not part of the image build.
+- `web` runs `node scripts/build-start.mjs`. It starts the regular Next.js production server on `0.0.0.0`, using Build's `PORT` (8080 when unset), and forwards shutdown signals to it. `npm start` remains available for other hosts and local checks.
+
+Configure `DATABASE_URL`, the public HTTPS `APP_URL`, a stable `BETTER_AUTH_SECRET`, and a `SETUP_TOKEN` before opening a new installation. For a demo without an email provider, set `EMAIL_DRIVER=mock`; messages stay in Postgres and administrators open their links in Settings, Organization, Mock email outbox. Nothing is sent externally and no Resend credentials or domain setup are needed. For real email, set `RESEND_API_KEY` and use `EMAIL_DRIVER=resend`. The filesystem capture driver is only for development. Use durable file storage, such as a private Blob store with `BLOB_READ_WRITE_TOKEN`; Build's application filesystem must not be the only copy of uploaded documents. The [settings for other hosts](#self-hosting-somewhere-else) apply here too.
+
+Use `/api/health` as the readiness check. It returns 200 only when Postgres answers `select 1`, and 503 when the database is missing or unavailable. The response contains no configuration details and is not cached. Migrations must succeed before routing traffic to the new release.
+
+The web process also schedules the [daily cleanup](#daily-cleanup) at **09:00 UTC**. Set `RETENTION_JOB_SECRET` or `CRON_SECRET`; the scheduler sends it as a bearer token to the server over the container's loopback interface. If `BACKUP_BLOB_READ_WRITE_TOKEN` is configured, it also calls the existing Blob backup route at **08:00 UTC**. See [Backup and restore](backup-and-restore.md) for that store's setup and limitations.
+
+Keep **one web process** with these timers enabled. Cleanup has a database lock, but the backup route does not prevent two authorized schedulers from starting together. Set `SIGNUDOC_SCHEDULED_JOBS=off` on additional web instances, or on every instance when an external scheduler handles the two authenticated requests. The built-in timers require a continuously running web process; missed runs during downtime are not replayed. Each scheduled call waits briefly for server and database readiness, then makes one bounded request. It does not retry a maintenance request that may still be running. Check the `[maintenance]` logs for failures; they omit secrets and response bodies.
+
 ## Self-hosting somewhere else
 
 SignuDoc is a regular Next.js app and runs anywhere Node.js 24 and Postgres do:
@@ -340,13 +358,13 @@ Away from Vercel, a few things Vercel does for you are yours to set:
 - `DATABASE_URL`, pointing at your Postgres. Run `npm run db:migrate` on every deploy; it only applies what is new.
 - `APP_URL`, the site's public HTTPS address.
 - `BETTER_AUTH_SECRET`, at least 32 characters (`openssl rand -hex 32`). Without it a secret is derived from the database password, which must then be at least 12 characters long.
-- `RESEND_API_KEY`, from your Resend account.
+- For real email, `RESEND_API_KEY`, from your Resend account, and `EMAIL_DRIVER=resend`.
 - Files are kept on the machine's disk under `.data/storage` (`STORAGE_LOCAL_DIR` changes where), so that disk must survive restarts. To use a Vercel Blob store from elsewhere, set `BLOB_READ_WRITE_TOKEN`.
-- Leave `EMAIL_DRIVER` unset. The capture driver is for development only.
+- For a demo without an email provider, set `EMAIL_DRIVER=mock`. Messages and their plain-text previews are available only to administrators under Settings, Organization, Mock email outbox; nothing is sent externally. This works in production and stores messages in Postgres. The filesystem capture driver is for development only.
 
 Self-hosted operators are responsible for:
 
 - linking to their own terms and privacy policy under Settings, Organization;
-- keeping the support address pointed at a mailbox someone reads, and verifying a sending domain for email;
+- keeping the support address pointed at a mailbox someone reads, and verifying a sending domain when using real email;
 - configuring retention, consent, and compliance requirements for their own deployment; and
 - scheduling the [daily cleanup](#daily-cleanup) if they are not on Vercel, where it is scheduled for them.

@@ -34,6 +34,7 @@ export type SetupShellView =
 
 type SetupShellProps = {
   hosted: boolean;
+  mockEmail: boolean;
   onVercel: boolean;
   /**
    * A support address setup does not ask for, because SUPPORT_EMAIL sets it
@@ -70,6 +71,7 @@ const emptyValues: SetupValues = {
 
 export function SetupShell({
   hosted,
+  mockEmail,
   knownSupportAddress,
   onVercel,
   resendDomain,
@@ -90,6 +92,7 @@ export function SetupShell({
           <section className="panel w-full max-w-[520px] p-8 sm:p-10">
             <SetupContent
               hosted={hosted}
+              mockEmail={mockEmail}
               knownSupportAddress={knownSupportAddress}
               onVercel={onVercel}
               resendDomain={resendDomain}
@@ -107,6 +110,7 @@ export function SetupShell({
 
 function SetupContent({
   hosted,
+  mockEmail,
   knownSupportAddress,
   onVercel,
   resendDomain,
@@ -199,6 +203,7 @@ function SetupContent({
   return (
     <SetupForm
       hosted={hosted}
+      mockEmail={mockEmail}
       knownSupportAddress={knownSupportAddress}
       resendDomain={resendDomain}
       siteHost={siteHost}
@@ -250,12 +255,14 @@ type SenderErrors = Partial<Record<keyof SenderAddressParts, string>>;
 
 function SetupForm({
   hosted,
+  mockEmail,
   knownSupportAddress,
   resendDomain,
   siteHost,
   view,
 }: {
   hosted: boolean;
+  mockEmail: boolean;
   knownSupportAddress: string | null;
   resendDomain: string | null;
   siteHost: string | null;
@@ -287,7 +294,7 @@ function SetupForm({
   const router = useRouter();
   const isCreate = view.view === "create";
   const requiresToken = isCreate ? view.requiresToken : true;
-  const asksForSender = isCreate && !view.senderAddressFromEnv;
+  const asksForSender = isCreate && !view.senderAddressFromEnv && !mockEmail;
   const asksForSupport = view.asksForSupportAddress;
   const suggestedRootDomain = asksForSender
     ? suggestSendingRootDomain({
@@ -424,12 +431,28 @@ function SetupForm({
         </p>
       ) : null}
 
+      {mockEmail ? (
+        <div className="notice notice-success" role="status">
+          <p className="font-bold">Mock email — nothing is sent externally</p>
+          <p className="mt-1 text-sm leading-6">
+            No email provider, paid service, or DNS setup is needed. After
+            setup, open invitations and verification links in Settings,
+            Organization, Mock email outbox. Only administrators can open the
+            outbox; recipients receive no email.
+          </p>
+        </div>
+      ) : null}
+
       <form className="space-y-5" noValidate onSubmit={handleSubmit}>
         <FieldShell
           autoComplete="organization"
           disabled={isSubmitting}
           error={errors.organizationName}
-          helper="Shown in the header and in every email this site sends."
+          helper={
+            mockEmail
+              ? "Shown in the header and in mock emails."
+              : "Shown in the header and in every email this site sends."
+          }
           label="Organization name"
           name="setup-organization-name"
           onChange={handleChange("organizationName")}
@@ -443,7 +466,11 @@ function SetupForm({
             autoComplete="off"
             disabled={isSubmitting}
             error={errors.supportAddress}
-            helper="Signers and people with an account are told to write here for help, and replies to this site's emails come here. You can change it in Settings."
+            helper={
+              mockEmail
+                ? "The support address shown to signers and people with an account. You can change it in Settings."
+                : "Signers and people with an account are told to write here for help, and replies to this site's emails come here. You can change it in Settings."
+            }
             ignorePasswordManagers
             label="Support email"
             name="setup-support-address"

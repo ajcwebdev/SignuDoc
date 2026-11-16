@@ -9,6 +9,7 @@ import { type EmailTemplateKind } from "../types/domain.ts";
 import { getEnv, isLocalDeployment, type EnvSource } from "../utils/env.ts";
 import { buildEmailAddresses, type EmailAddresses } from "./email-addresses.ts";
 import { assertServiceConfig } from "./service-config.ts";
+import { storeMockEmails } from "./mock-email-outbox.ts";
 
 // The addresses mail is sent from and replied to are not needed here: they
 // come from RESEND_FROM_EMAIL and SUPPORT_EMAIL when those are set, and from
@@ -18,7 +19,7 @@ const EMAIL_ENV_KEYS = ["RESEND_API_KEY"] as const;
 const DEFAULT_CAPTURE_DIR = ".data/outbox";
 const DEFAULT_CAPTURE_SENDER_ADDRESS = "dev@signudoc.localhost";
 
-export type EmailDriver = "capture" | "resend";
+export type EmailDriver = "capture" | "mock" | "resend";
 
 export type EmailAttachment = {
   content: Uint8Array;
@@ -189,12 +190,16 @@ export function resolveEmailDriver(env: EnvSource = process.env): EmailDriver {
     return "resend";
   }
 
-  if (configuredDriver === "capture" || configuredDriver === "resend") {
+  if (
+    configuredDriver === "capture" ||
+    configuredDriver === "mock" ||
+    configuredDriver === "resend"
+  ) {
     return configuredDriver;
   }
 
   throw new Error(
-    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend" or "capture".`,
+    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend", "mock" or "capture".`,
   );
 }
 
@@ -291,7 +296,7 @@ export async function resolveEmailAddresses(
 ): Promise<EmailAddresses> {
   const settings = await getSettings(env);
 
-  return resolveEmailDriver(env) === "capture"
+  return resolveEmailDriver(env) !== "resend"
     ? buildEmailAddresses(settings, DEFAULT_CAPTURE_SENDER_ADDRESS)
     : buildEmailAddresses(settings);
 }
@@ -302,6 +307,31 @@ export function createEmailService({
   resendClient,
   wait = waitFor,
 }: CreateEmailServiceOptions = {}): EmailService {
+  // An explicitly selected mock driver must never initialize a provider,
+  // even when a caller supplies a provider client.
+  if (resolveEmailDriver(env) === "mock") {
+    return {
+      async send(message, options) {
+        const results = await storeMockEmails(
+          [message],
+          await resolveAddresses(),
+          options,
+          "single",
+        );
+        return results[0]!;
+      },
+      async sendBatch(messages, options) {
+        if (messages.length === 0) return [];
+        return storeMockEmails(
+          messages,
+          await resolveAddresses(),
+          options,
+          "batch",
+        );
+      },
+    };
+  }
+
   if (!resendClient && resolveEmailDriver(env) === "capture") {
     return createCaptureEmailService(env, resolveAddresses);
   }

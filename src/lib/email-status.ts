@@ -62,7 +62,8 @@ export type EmailStatus =
       records: EmailDnsRecord[];
       senderAddress: string;
     }
-  | { state: "ready"; domain: string; senderAddress: string }
+  | { state: "ready"; driver?: "resend"; domain: string; senderAddress: string }
+  | { state: "ready"; driver: "mock"; domain: string; senderAddress: string }
   | { state: "error"; message: string; senderAddress: string };
 
 /** The parts of the Resend SDK used here. Replaced by a fake in tests. */
@@ -380,6 +381,25 @@ async function inspectEmail({
 }: EmailStatusOptions): Promise<Inspection> {
   const noop = async () => undefined;
 
+  if (resolveEmailDriver(env) === "mock") {
+    const resolvedSettings = settings ?? (await getSettings(env));
+    const senderAddress = extractEmailAddress(
+      buildEmailAddresses(resolvedSettings, "dev@signudoc.localhost")
+        .senderAddress,
+    );
+    return {
+      client: null,
+      domainId: null,
+      markReady: noop,
+      status: {
+        state: "ready",
+        driver: "mock",
+        senderAddress,
+        domain: getAddressDomain(senderAddress) ?? "signudoc.localhost",
+      },
+    };
+  }
+
   if (!domainsClient && resolveEmailDriver(env) === "capture") {
     return {
       client: null,
@@ -557,7 +577,7 @@ export function emailNeedsAttention(
   env: EnvSource = process.env,
 ): boolean {
   try {
-    if (resolveEmailDriver(env) === "capture") {
+    if (resolveEmailDriver(env) !== "resend") {
       return false;
     }
   } catch {

@@ -33,6 +33,39 @@ const stored: AppSettings = {
 const env = { RESEND_API_KEY: "re_test_key" };
 const settings = resolveSettings(stored, env);
 
+test("mock email is ready without a key and never asks Resend about domains", async () => {
+  let calls = 0;
+  const domainsClient = new Proxy(
+    {},
+    {
+      get() {
+        calls++;
+        throw new Error("Must not call Resend");
+      },
+    },
+  ) as ResendDomainsClient;
+  const options = {
+    env: {
+      EMAIL_DRIVER: "mock",
+      NODE_ENV: "production",
+      APP_URL: "https://sign.acme.com",
+    },
+    settings,
+    domainsClient,
+  };
+  for (const inspect of [getEmailStatus, addEmailDomain, recheckEmailDomain]) {
+    const status = await inspect(options);
+    assert.deepEqual(status, {
+      state: "ready",
+      driver: "mock",
+      domain: "acme.com",
+      senderAddress: "sign@acme.com",
+    });
+  }
+  assert.equal(calls, 0);
+  assert.equal(emailNeedsAttention(settings, options.env), false);
+});
+
 const DKIM_RECORD = {
   name: "resend._domainkey",
   record: "DKIM",

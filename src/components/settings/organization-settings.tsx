@@ -5,6 +5,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { FieldShell, ShellButton } from "@/components/shared/form-shell";
 import { BrandingPanel } from "@/components/settings/branding-panel";
+import { MockEmailOutbox } from "@/components/settings/mock-email-outbox";
 import { Part11Panel } from "@/components/settings/part11-panel";
 import { PeoplePanel } from "@/components/settings/people-panel";
 import { SecurityPanel } from "@/components/settings/security-panel";
@@ -82,6 +83,7 @@ export function OrganizationSettings({
   // Bumped after a save, so the email panel looks again: a new sender
   // address means a different domain to check.
   const [emailRevision, setEmailRevision] = useState(0);
+  const [isMockEmail, setIsMockEmail] = useState(false);
 
   function handleChange(field: OrganizationSettingsField) {
     return (event: ChangeEvent<HTMLInputElement>) => {
@@ -282,7 +284,9 @@ export function OrganizationSettings({
                 helper={
                   values.senderAddressFromEnv
                     ? "Set by the RESEND_FROM_EMAIL environment variable."
-                    : "The address emails come from, at a domain you own. A subdomain such as notifications@sign.yourcompany.com keeps this site's mail apart from your everyday email."
+                    : isMockEmail
+                      ? "Optional sender label for mock emails. No verified domain or email provider is needed; nothing is sent externally."
+                      : "The address emails come from, at a domain you own. A subdomain such as notifications@sign.yourcompany.com keeps this site's mail apart from your everyday email."
                 }
                 label="Send email from"
                 name="sender-address"
@@ -395,7 +399,10 @@ export function OrganizationSettings({
           </ShellButton>
         </form>
 
-        <EmailSetupPanel key={emailRevision} />
+        <EmailSetupPanel
+          key={emailRevision}
+          onMockModeChange={setIsMockEmail}
+        />
 
         {/* The hosted service's accounts are strangers to each other, not
             one organization, so it has no list of them here. */}
@@ -432,11 +439,16 @@ async function fetchEmailStatus(
   return { status: payload.status };
 }
 
-function EmailSetupPanel() {
+function EmailSetupPanel({
+  onMockModeChange,
+}: {
+  onMockModeChange: (isMock: boolean) => void;
+}) {
   const [status, setStatus] = useState<EmailStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<EmailAction | null>(null);
   const [testResult, setTestResult] = useState<Feedback>(null);
+  const [outboxRevision, setOutboxRevision] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -446,6 +458,9 @@ function EmailSetupPanel() {
         if (result.status) {
           setLoadError(null);
           setStatus(result.status);
+          onMockModeChange(
+            result.status.state === "ready" && result.status.driver === "mock",
+          );
         } else {
           setLoadError(result.error);
         }
@@ -458,7 +473,7 @@ function EmailSetupPanel() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [onMockModeChange]);
 
   async function runAction(action: EmailAction) {
     if (pendingAction) {
@@ -484,14 +499,20 @@ function EmailSetupPanel() {
       }
 
       if (payload?.test) {
+        const isMock =
+          payload.status?.state === "ready" && payload.status.driver === "mock";
         setTestResult(
           payload.test.sent
             ? {
-                message: `Test email sent to ${payload.test.to}. Check that inbox.`,
+                message: isMock
+                  ? `Mock test email for ${payload.test.to} saved to the outbox below. Nothing was sent externally.`
+                  : `Test email sent to ${payload.test.to}. Check that inbox.`,
                 tone: "success",
               }
             : { message: payload.test.message, tone: "error" },
         );
+        if (isMock && payload.test.sent)
+          setOutboxRevision((revision) => revision + 1);
       } else if (!response.ok) {
         setLoadError(payload?.error ?? GENERIC_ERROR_MESSAGE);
       }
@@ -503,6 +524,7 @@ function EmailSetupPanel() {
   }
 
   const summary = status ? describeEmailStatus(status) : null;
+  const isMock = status?.state === "ready" && status.driver === "mock";
   const canSendTest =
     status !== null &&
     status.state !== "missing_key" &&
@@ -595,8 +617,12 @@ function EmailSetupPanel() {
             variant="secondary"
           >
             {pendingAction === "send_test"
-              ? "Sending..."
-              : "Send me a test email"}
+              ? isMock
+                ? "Creating..."
+                : "Sending..."
+              : isMock
+                ? "Create mock test email"
+                : "Send me a test email"}
           </ShellButton>
         ) : null}
         {status?.state === "restricted_key" ||
@@ -618,6 +644,8 @@ function EmailSetupPanel() {
           {testResult.message}
         </p>
       ) : null}
+
+      {isMock ? <MockEmailOutbox revision={outboxRevision} /> : null}
     </div>
   );
 }
@@ -729,6 +757,16 @@ function describeEmailStatus(status: EmailStatus): {
         title: "Finish the domain in Resend",
       };
     case "ready":
+      if (status.driver === "mock") {
+        return {
+          lines: [
+            "Messages are saved privately in this installation's database. No email provider, API key, or verified sending domain is needed.",
+            "Open invitations, password resets, and verification links in the administrator-only mock email outbox below. Recipients do not receive these messages.",
+          ],
+          ready: true,
+          title: "Mock email — nothing is sent externally",
+        };
+      }
       return {
         lines: [
           `Emails are sent from ${status.senderAddress}, and ${status.domain} is verified.`,
