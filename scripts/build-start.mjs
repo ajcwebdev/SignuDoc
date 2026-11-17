@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { isDemoMode, startDemoBackend } from "./demo-backend.mjs";
+
 export function resolvePort(
   env = /** @type {Record<string, string | undefined>} */ (process.env),
 ) {
@@ -125,12 +127,12 @@ export function startDailyJobs({
 /**
  * @param {import("node:events").EventEmitter & Pick<import("node:child_process").ChildProcess, "kill">} child
  * @param {() => void} stopJobs
- * @param {{events?: import("node:events").EventEmitter, exit?: (code: number) => void}} [options]
+ * @param {{events?: import("node:events").EventEmitter, exit?: (code: number) => void, cleanup?: () => Promise<void>}} [options]
  */
 export function supervise(
   child,
   stopJobs,
-  { events = process, exit = (code) => process.exit(code) } = {},
+  { events = process, exit = (code) => process.exit(code), cleanup } = {},
 ) {
   let stopping = false;
   let finished = false;
@@ -154,7 +156,19 @@ export function supervise(
     clearTimeout(killTimer);
     events.removeListener("SIGTERM", onTerm);
     events.removeListener("SIGINT", onInt);
-    exit(code);
+    if (cleanup) {
+      Promise.resolve()
+        .then(cleanup)
+        .then(
+          () => exit(code),
+          () => {
+            console.error("[demo] Could not finish demo cleanup.");
+            exit(1);
+          },
+        );
+    } else {
+      exit(code);
+    }
   }
   child.once("error", () => {
     console.error("[web] Could not start Next.js.");
@@ -165,8 +179,26 @@ export function supervise(
   });
 }
 
-function main() {
+async function main() {
   const port = resolvePort();
+  let startupStopped = false;
+  const stopStartup = () => {
+    startupStopped = true;
+  };
+  process.once("SIGTERM", stopStartup);
+  process.once("SIGINT", stopStartup);
+  let demo;
+  try {
+    if (isDemoMode()) demo = await startDemoBackend();
+  } finally {
+    process.removeListener("SIGTERM", stopStartup);
+    process.removeListener("SIGINT", stopStartup);
+  }
+  if (startupStopped) {
+    await demo?.close();
+    return;
+  }
+  const env = demo?.env ?? process.env;
   const child = spawn(
     process.execPath,
     [
@@ -181,22 +213,20 @@ function main() {
     ],
     {
       stdio: "inherit",
-      env: { ...process.env, NODE_ENV: "production", PORT: port },
+      env: { ...env, NODE_ENV: "production", PORT: port },
     },
   );
-  supervise(child, startDailyJobs({ port }));
+  supervise(child, startDailyJobs({ port, env }), { cleanup: demo?.close });
 }
 
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(
       error instanceof Error ? error.message : "Could not start web process.",
     );
     process.exitCode = 1;
-  }
+  });
 }

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { DemoBanner } from "@/components/demo/demo-banner";
+import { isDemoMode } from "@/lib/demo";
 
 import "./globals.css";
 
@@ -29,7 +31,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${plusJakartaSans.variable} antialiased`}>
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          {isDemoMode() ? <DemoBanner /> : null}
+          {children}
+        </TooltipProvider>
       </body>
     </html>
   );

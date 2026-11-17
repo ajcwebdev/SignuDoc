@@ -125,6 +125,13 @@ async function main() {
 
   loadLocalEnvFiles();
 
+  if (process.env.SIGNUDOC_DEMO_MODE === "1") {
+    console.log(
+      "[migrate] demo schema is initialized in memory when the web process starts.",
+    );
+    return;
+  }
+
   if (
     process.env.VERCEL === "1" &&
     process.env.VERCEL_ENV !== "production" &&

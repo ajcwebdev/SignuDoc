@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 
 import { LandingShell } from "@/components/landing/landing-shell";
+import { DemoEntry } from "@/components/demo/demo-entry";
 import { getAuthSession } from "@/lib/auth/server";
+import { isDemoMode } from "@/lib/demo";
 import { redirectToSetupIfNeeded } from "@/lib/install";
 import { isHostedMode } from "@/lib/utils/env";
 
@@ -13,6 +15,9 @@ import { isHostedMode } from "@/lib/utils/env";
 export default async function Home() {
   // Decided per request, not when the app was built.
   await connection();
+  if (isDemoMode()) {
+    return <DemoEntry />;
+  }
   await redirectToSetupIfNeeded();
 
   if (isHostedMode()) {

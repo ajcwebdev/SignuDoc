@@ -328,6 +328,10 @@ It is opt-in for now because it has not yet been proven against a live Vercel de
 
 ## Deploy to Build
 
+For a disposable public demo without external services, set `SIGNUDOC_DEMO_MODE=1` and keep one web process. The same launcher starts an in-memory backend, applies the schema, uses temporary local files and captures emails in the mock outbox. Visitors choose **Try the demo** to open a fresh account with a sample PDF. A banner identifies demo mode throughout the app. Use sample data: accounts, documents and messages disappear when the process restarts. The demo does not connect to configured external databases, Blob storage or email providers. The release-phase migration command defers initialization to the demo web process. Leave the flag unset for a normal installation with durable storage.
+
+Set the demo flag before running `npm run build`. Its `postbuild` hook prepares `.next/demo-schema.tar.gz`; the web launcher loads this schema snapshot into fresh memory on each start. The `Procfile` limits WebAssembly compilation in the parent process so the demo fits a 512 MB web instance. Keep those Node flags when starting the launcher directly. The supervised Next.js server uses its normal Node settings.
+
 Deploy this repository with Build's Heroku Node.js buildpack. `package.json` pins Node.js 24, and the build runs `npm run build`. Set `NPM_CONFIG_INCLUDE=dev` in Build so npm installs the TypeScript and Tailwind build tools even when `NODE_ENV=production`. Keep the complete application and its installed dependencies in the release: PDF generation reads the bundled fonts and WebAssembly files at runtime.
 
 The root `Procfile` defines two processes:
